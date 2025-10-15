@@ -1,0 +1,21 @@
+# Python sanal ortamı
+venv/
+
+# Python derlenmiş dosyaları ve önbellek
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ortam değişkenleri dosyası
+.env
+
+# Botun çalışma zamanında oluşturduğu veri dosyası
+subscriptions.json
+
+# IDE ve işletim sistemi özel dosyaları
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
