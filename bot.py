@@ -13,7 +13,6 @@ from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from webdriver_manager.firefox import GeckoDriverManager
 from selenium.webdriver.common.by import By
-# YENİ: Akıllı bekleme için gerekli kütüphaneler
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
@@ -35,26 +34,19 @@ def load_subscriptions():
 def save_subscriptions(subscriptions):
     with open(SUBS_FILE, 'w', encoding='utf-8') as f: json.dump(subscriptions, f, indent=4)
 
-# GÜNCELLENMİŞ: Selenium Fonksiyonu artık akıllı bekleme kullanıyor
+# GÜNCELLENMİŞ: Selenium Fonksiyonu artık BODY etiketini arıyor
 def get_kick_channel_data_with_driver(driver, username):
     data = None
     try:
         api_url = f"https://kick.com/api/v2/channels/{username}"
         driver.get(api_url)
-        # Sayfadaki <pre> etiketinin yüklenmesini 10 saniyeye kadar bekle
+        # ---> DEĞİŞİKLİK BURADA: Artık <pre> yerine <body> etiketini bekliyoruz
         wait = WebDriverWait(driver, 10)
-        pre_element = wait.until(EC.presence_of_element_located((By.TAG_NAME, 'pre')))
-        json_text = pre_element.text
+        body_element = wait.until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+        json_text = body_element.text
         data = json.loads(json_text)
     except Exception as e:
         print(f"Selenium ile Kick verisi alınırken hata ({username}): {e}")
-        # HATA DURUMUNDA SAYFANIN KAYNAK KODUNU LOGLARA BAS
-        try:
-            print("--- HATA ANINDAKİ SAYFA KAYNAĞI ---")
-            print(driver.page_source)
-            print("---------------------------------")
-        except:
-            pass # Sayfa kaynağını alırken bile hata olursa yoksay
     return data
 
 @bot.event
@@ -70,7 +62,74 @@ async def on_ready():
     check_feeds.start()
     print("Slash komutları senkronize edildi ve feed kontrol döngüsü başladı.")
 
-# ... (Slash komutları ve diğer fonksiyonlar aynı kalıyor) ...
+# --- Slash Komutları (Değişiklik yok) ---
+@tree.command(name="help", description="Bot komutları hakkında bilgi verir.")
+async def help(interaction: discord.Interaction):
+    embed = discord.Embed(title="Yardım Menüsü - NOTIFICATION BOT", description="Bu bot YouTube, Kick ve web sitelerinden yeni içerikleri takip eder.", color=discord.Color.blue())
+    embed.add_field(name="/kick_ekle", value="Bir Kick kanalını takip etmek için kullanılır.\n`kullanici_adi`: Kick yayıncısının kullanıcı adı.\n`kanal`: Bildirimlerin gönderileceği Discord kanalı.", inline=False)
+    embed.add_field(name="/youtube_ekle", value="Bir YouTube kanalını takip etmek için kullanılır.\n`channel_id`: YouTube kanalının 'UC...' ile başlayan ID'si.", inline=False)
+    embed.add_field(name="/feed_ekle", value="Bir web sitesinin RSS/Atom feed'ini takip etmek için kullanılır.\n`feed_url`: Sitenin RSS adresi.", inline=False)
+    embed.add_field(name="/abonelikleri_listele", value="Tüm aktif abonelikleri listeler.", inline=False)
+    embed.add_field(name="/abonelik_sil", value="Listeden bir aboneliği numarasını girerek siler.", inline=False)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@tree.command(name="kick_ekle", description="Yayın açıldığında bildirim almak için bir Kick kanalını takip et.")
+async def kick_ekle(interaction: discord.Interaction, kullanici_adi: str, kanal: discord.TextChannel):
+    kullanici_adi = kullanici_adi.lower()
+    subscriptions = load_subscriptions()
+    for sub in subscriptions:
+        if sub.get('type') == 'kick' and sub.get('username') == kullanici_adi and sub['discord_channel_id'] == kanal.id:
+            await interaction.response.send_message(f"`{kullanici_adi}` adlı Kick kanalı zaten <#{kanal.id}> kanalında takip ediliyor.", ephemeral=True); return
+    new_sub = {'type': 'kick', 'id': f"kick_{kullanici_adi}", 'username': kullanici_adi, 'discord_channel_id': kanal.id, 'was_live': False}
+    subscriptions.append(new_sub); save_subscriptions(subscriptions)
+    await interaction.response.send_message(f"✅ Başarılı! Kick kanalı (`{kullanici_adi}`) yayın açtığında artık <#{kanal.id}> kanalına bildirilecek.")
+
+@tree.command(name="youtube_ekle", description="Yeni videolar için bir YouTube kanalını takip et.")
+async def youtube_ekle(interaction: discord.Interaction, channel_id: str, kanal: discord.TextChannel):
+    if not channel_id.startswith("UC"): await interaction.response.send_message("Lütfen geçerli bir YouTube Kanal ID'si girin ('UC' ile başlar).", ephemeral=True); return
+    feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+    subscriptions = load_subscriptions()
+    for sub in subscriptions:
+        if sub.get('url') == feed_url and sub['discord_channel_id'] == kanal.id: await interaction.response.send_message(f"Bu YouTube kanalı zaten <#{kanal.id}> kanalında takip ediliyor.", ephemeral=True); return
+    new_sub = {'type': 'youtube','id': channel_id,'url': feed_url,'discord_channel_id': kanal.id,'last_entry_id': None}
+    subscriptions.append(new_sub); save_subscriptions(subscriptions)
+    await interaction.response.send_message(f"✅ Başarılı! YouTube kanalı (`{channel_id}`) artık <#{kanal.id}> kanalına bildirilecek.")
+
+@tree.command(name="feed_ekle", description="Yeni yazılar için bir web sitesi RSS/Atom feed'ini takip et.")
+async def feed_ekle(interaction: discord.Interaction, feed_url: str, kanal: discord.TextChannel):
+    subscriptions = load_subscriptions()
+    for sub in subscriptions:
+        if sub.get('url') == feed_url and sub['discord_channel_id'] == kanal.id: await interaction.response.send_message(f"Bu feed zaten <#{kanal.id}> kanalında takip ediliyor.", ephemeral=True); return
+    new_sub = {'type': 'rss', 'id': feed_url, 'url': feed_url, 'discord_channel_id': kanal.id, 'last_entry_id': None}
+    subscriptions.append(new_sub); save_subscriptions(subscriptions)
+    await interaction.response.send_message(f"✅ Başarılı! Feed (`{feed_url}`) artık <#{kanal.id}> kanalına bildirilecek.")
+
+@tree.command(name="abonelikleri_listele", description="Tüm aktif abonelikleri gösterir.")
+async def abonelikleri_listele(interaction: discord.Interaction):
+    subscriptions = load_subscriptions()
+    if not subscriptions: await interaction.response.send_message("Takip edilen hiçbir abonelik bulunmuyor.", ephemeral=True); return
+    embed = discord.Embed(title="Aktif Abonelikler", color=discord.Color.orange())
+    description_text = ""
+    for i, sub in enumerate(subscriptions):
+        channel = bot.get_channel(sub['discord_channel_id'])
+        channel_mention = f"<#{channel.id}>" if channel else "Bilinmeyen Kanal"
+        sub_id = sub.get('username') or sub.get('id')
+        description_text += f"**{i+1}.** `{sub['type'].upper()}`: `{sub_id}` -> {channel_mention}\n"
+    embed.description = description_text
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@tree.command(name="abonelik_sil", description="Bir aboneliği listedeki numarasına göre siler.")
+async def abonelik_sil(interaction: discord.Interaction, numara: int):
+    subscriptions = load_subscriptions()
+    index = numara - 1
+    if 0 <= index < len(subscriptions):
+        removed_sub = subscriptions.pop(index)
+        save_subscriptions(subscriptions)
+        sub_id = removed_sub.get('username') or removed_sub.get('id')
+        await interaction.response.send_message(f"✅ `{sub_id}` aboneliği başarıyla silindi.", ephemeral=True)
+    else: await interaction.response.send_message("Geçersiz numara. Lütfen `/abonelikleri_listele` komutu ile doğru numarayı kontrol edin.", ephemeral=True)
+
+
 # --- ARKA PLAN GÖREVİ (FEED KONTROLÜ) - MİMARİ DEĞİŞTİ ---
 @tasks.loop(minutes=5)
 async def check_feeds():
@@ -94,7 +153,6 @@ async def check_feeds():
             for sub in kick_subs:
                 username = sub['username']
                 data = await bot.loop.run_in_executor(None, get_kick_channel_data_with_driver, driver, username)
-                
                 if data is None: continue
 
                 livestream_data = data.get('livestream')
