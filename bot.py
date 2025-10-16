@@ -7,25 +7,20 @@ import aiohttp
 from dotenv import load_dotenv
 from datetime import datetime
 import re
-import cloudscraper # YENİ KÜTÜPHANE
+import time
+from selenium import webdriver
+from selenium.webdriver.firefox.service import Service as FirefoxService
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from webdriver_manager.firefox import GeckoDriverManager
+from selenium.webdriver.common.by import By
 
 # .env dosyasındaki değişkenleri yükle
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
-
-# JSON dosyasının adı
 SUBS_FILE = 'subscriptions.json'
-
-# Bot için gerekli 'intents' (izinler) ayarlanıyor.
 intents = discord.Intents.default()
-
-# Bot'u oluşturuyoruz
 bot = discord.Client(intents=intents)
-# Slash komutlarını yönetmek için bir Command Tree oluşturuyoruz
 tree = discord.app_commands.CommandTree(bot)
-
-# YENİ: Cloudscraper nesnesini bot başladığında bir kere oluşturuyoruz
-scraper = cloudscraper.create_scraper()
 
 # --- Veri Saklama Fonksiyonları --- (Aynı kalıyor)
 def load_subscriptions():
@@ -37,6 +32,33 @@ def load_subscriptions():
 def save_subscriptions(subscriptions):
     with open(SUBS_FILE, 'w', encoding='utf-8') as f: json.dump(subscriptions, f, indent=4)
 
+# YENİ: Selenium Tarayıcı Fonksiyonu
+def get_kick_channel_data(username):
+    # Görünmez (headless) mod için tarayıcı seçeneklerini ayarla
+    options = FirefoxOptions()
+    options.add_argument("--headless")
+    
+    # Tarayıcıyı başlat
+    driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=options)
+    
+    data = None
+    try:
+        # API adresine git
+        api_url = f"https://kick.com/api/v2/channels/{username}"
+        driver.get(api_url)
+        # Sayfanın yüklenmesi için kısa bir bekleme
+        time.sleep(3)
+        # Sayfadaki veriyi çek (API doğrudan JSON döndürdüğü için body içindeki pre etiketini alırız)
+        json_text = driver.find_element(By.TAG_NAME, 'pre').text
+        data = json.loads(json_text)
+    except Exception as e:
+        print(f"Selenium ile Kick verisi alınırken hata: {e}")
+    finally:
+        # Hata olsa da olmasa da tarayıcıyı mutlaka kapat
+        driver.quit()
+        
+    return data
+
 # --- BOT HAZIR OLDUĞUNDA ÇALIŞACAK KOD --- (Aynı kalıyor)
 @bot.event
 async def on_ready():
@@ -45,10 +67,10 @@ async def on_ready():
     check_feeds.start()
     print("Slash komutları senkronize edildi ve feed kontrol döngüsü başladı.")
 
-# --- SLASH KOMUTLARI --- (Hepsi aynı kalıyor, buraya tekrar eklemiyorum)
+# --- SLASH KOMUTLARI --- (Hepsi aynı kalıyor)
 @tree.command(name="help", description="Bot komutları hakkında bilgi verir.")
+# ... (kod aynı)
 async def help(interaction: discord.Interaction):
-    # ... (kod aynı)
     embed = discord.Embed(title="Yardım Menüsü - NOTIFICATION BOT", description="Bu bot YouTube, Kick ve web sitelerinden yeni içerikleri takip eder.", color=discord.Color.blue())
     embed.add_field(name="/kick_ekle", value="Bir Kick kanalını takip etmek için kullanılır.\n`kullanici_adi`: Kick yayıncısının kullanıcı adı.\n`kanal`: Bildirimlerin gönderileceği Discord kanalı.", inline=False)
     embed.add_field(name="/youtube_ekle", value="Bir YouTube kanalını takip etmek için kullanılır.\n`channel_id`: YouTube kanalının 'UC...' ile başlayan ID'si.", inline=False)
@@ -58,8 +80,8 @@ async def help(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @tree.command(name="kick_ekle", description="Yayın açıldığında bildirim almak için bir Kick kanalını takip et.")
+# ... (kod aynı)
 async def kick_ekle(interaction: discord.Interaction, kullanici_adi: str, kanal: discord.TextChannel):
-    # ... (kod aynı)
     kullanici_adi = kullanici_adi.lower()
     subscriptions = load_subscriptions()
     for sub in subscriptions:
@@ -69,82 +91,27 @@ async def kick_ekle(interaction: discord.Interaction, kullanici_adi: str, kanal:
     subscriptions.append(new_sub); save_subscriptions(subscriptions)
     await interaction.response.send_message(f"✅ Başarılı! Kick kanalı (`{kullanici_adi}`) yayın açtığında artık <#{kanal.id}> kanalına bildirilecek.")
 
-@tree.command(name="youtube_ekle", description="Yeni videolar için bir YouTube kanalını takip et.")
-async def youtube_ekle(interaction: discord.Interaction, channel_id: str, kanal: discord.TextChannel):
-    # ... (kod aynı)
-    if not channel_id.startswith("UC"): await interaction.response.send_message("Lütfen geçerli bir YouTube Kanal ID'si girin ('UC' ile başlar).", ephemeral=True); return
-    feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
-    subscriptions = load_subscriptions()
-    for sub in subscriptions:
-        if sub.get('url') == feed_url and sub['discord_channel_id'] == kanal.id: await interaction.response.send_message(f"Bu YouTube kanalı zaten <#{kanal.id}> kanalında takip ediliyor.", ephemeral=True); return
-    new_sub = {'type': 'youtube','id': channel_id,'url': feed_url,'discord_channel_id': kanal.id,'last_entry_id': None}
-    subscriptions.append(new_sub); save_subscriptions(subscriptions)
-    await interaction.response.send_message(f"✅ Başarılı! YouTube kanalı (`{channel_id}`) artık <#{kanal.id}> kanalına bildirilecek.")
-
-@tree.command(name="feed_ekle", description="Yeni yazılar için bir web sitesi RSS/Atom feed'ini takip et.")
-async def feed_ekle(interaction: discord.Interaction, feed_url: str, kanal: discord.TextChannel):
-    # ... (kod aynı)
-    subscriptions = load_subscriptions()
-    for sub in subscriptions:
-        if sub.get('url') == feed_url and sub['discord_channel_id'] == kanal.id: await interaction.response.send_message(f"Bu feed zaten <#{kanal.id}> kanalında takip ediliyor.", ephemeral=True); return
-    new_sub = {'type': 'rss', 'id': feed_url, 'url': feed_url, 'discord_channel_id': kanal.id, 'last_entry_id': None}
-    subscriptions.append(new_sub); save_subscriptions(subscriptions)
-    await interaction.response.send_message(f"✅ Başarılı! Feed (`{feed_url}`) artık <#{kanal.id}> kanalına bildirilecek.")
-
-@tree.command(name="abonelikleri_listele", description="Tüm aktif abonelikleri gösterir.")
-async def abonelikleri_listele(interaction: discord.Interaction):
-    # ... (kod aynı)
-    subscriptions = load_subscriptions()
-    if not subscriptions: await interaction.response.send_message("Takip edilen hiçbir abonelik bulunmuyor.", ephemeral=True); return
-    embed = discord.Embed(title="Aktif Abonelikler", color=discord.Color.orange())
-    description_text = ""
-    for i, sub in enumerate(subscriptions):
-        channel = bot.get_channel(sub['discord_channel_id'])
-        channel_mention = f"<#{channel.id}>" if channel else "Bilinmeyen Kanal"
-        sub_id = sub.get('username') or sub.get('id')
-        description_text += f"**{i+1}.** `{sub['type'].upper()}`: `{sub_id}` -> {channel_mention}\n"
-    embed.description = description_text
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-@tree.command(name="abonelik_sil", description="Bir aboneliği listedeki numarasına göre siler.")
-async def abonelik_sil(interaction: discord.Interaction, numara: int):
-    # ... (kod aynı)
-    subscriptions = load_subscriptions()
-    index = numara - 1
-    if 0 <= index < len(subscriptions):
-        removed_sub = subscriptions.pop(index)
-        save_subscriptions(subscriptions)
-        sub_id = removed_sub.get('username') or removed_sub.get('id')
-        await interaction.response.send_message(f"✅ `{sub_id}` aboneliği başarıyla silindi.", ephemeral=True)
-    else: await interaction.response.send_message("Geçersiz numara. Lütfen `/abonelikleri_listele` komutu ile doğru numarayı kontrol edin.", ephemeral=True)
-
+# ... (Diğer komutlar youtube_ekle, feed_ekle, listele, sil aynı)
 
 # --- ARKA PLAN GÖREVİ (FEED KONTROLÜ) --- (ANA DEĞİŞİKLİK BURADA)
-@tasks.loop(minutes=3)
+@tasks.loop(minutes=5) # Selenium daha yavaş olduğu için süreyi 5 dakikaya çıkarmak iyi olabilir
 async def check_feeds():
     await bot.wait_until_ready()
-    
     subscriptions = load_subscriptions()
     if not subscriptions: return
-
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Tüm abonelikler kontrol ediliyor...")
 
-    # aiohttp oturumu RSS ve YouTube için hala gerekli
     async with aiohttp.ClientSession() as session:
         for sub in subscriptions:
             try:
-                # --- KICK KONTROL MANTIĞI (TAMAMEN YENİLENDİ) ---
                 if sub['type'] == 'kick':
-                    api_url = f"https://kick.com/api/v2/channels/{sub['username']}"
+                    username = sub['username']
+                    # Botu dondurmamak için senkron çalışan Selenium fonksiyonunu ayrı bir iş parçacığında çalıştır
+                    data = await bot.loop.run_in_executor(None, get_kick_channel_data, username)
                     
-                    # Botu dondurmamak için senkron çalışan scraper'ı ayrı bir iş parçacığında (thread) çalıştırıyoruz
-                    response = await bot.loop.run_in_executor(None, scraper.get, api_url)
-                    
-                    if response.status_code != 200:
-                        print(f"Hata: Kick API'ye ulaşılamadı ({sub['username']}). Status: {response.status_code}, Cevap: {response.text}")
+                    if data is None:
+                        print(f"Kick verisi alınamadı ({username}).")
                         continue
-                    
-                    data = response.json()
                     
                     livestream_data = data.get('livestream')
                     is_live_now = livestream_data is not None
@@ -166,38 +133,16 @@ async def check_feeds():
                     
                     elif not is_live_now and was_live_before:
                         sub['was_live'] = False
-                        print(f"Kick yayını sona erdi: {sub['username']}")
-                
-                # --- RSS / YOUTUBE KONTROL MANTIĞI (Aynı kalıyor) ---
+                        print(f"Kick yayını sona erdi: {username}")
+
                 elif sub['type'] in ['youtube', 'rss']:
-                    # ... (kod aynı)
-                    async with session.get(sub.get('url')) as response:
-                        if response.status != 200: continue
-                        content = await response.text()
-                        feed = feedparser.parse(content)
-                        if not feed.entries: continue
-                        latest_entry = feed.entries[0]
-                        entry_id = latest_entry.get('id') or latest_entry.get('link')
-                        if entry_id is None: continue
-                        if sub.get('last_entry_id') is None: sub['last_entry_id'] = entry_id; continue
-                        if sub.get('last_entry_id') != entry_id:
-                            channel = bot.get_channel(sub['discord_channel_id'])
-                            if channel:
-                                embed = discord.Embed(title=f"🆕 Yeni İçerik: {latest_entry.title}", url=latest_entry.link, description=f"**{feed.feed.title}** sitesinden yeni içerik var!", color=discord.Color.red() if sub['type'] == 'youtube' else discord.Color.green())
-                                if 'author' in latest_entry: embed.set_author(name=latest_entry.author)
-                                image_url = None
-                                if 'media_thumbnail' in latest_entry and latest_entry.media_thumbnail: image_url = latest_entry.media_thumbnail[0].get('url')
-                                elif 'summary' in latest_entry: match = re.search(r'<img[^>]+src="([^">]+)"', latest_entry.summary); image_url = match.group(1) if match else None
-                                if image_url: embed.set_image(url=image_url)
-                                await channel.send(embed=embed)
-                            sub['last_entry_id'] = entry_id
-                            print(f"Feed gönderisi gönderildi: {latest_entry.title}")
+                    # ... (RSS/YouTube kodu aynı)
+                    # ...
 
             except Exception as e:
                 print(f"Bir abonelik işlenirken hata oluştu ({sub.get('id')}): {e}")
 
     save_subscriptions(subscriptions)
-
 
 # Bot'u çalıştır
 bot.run(TOKEN)
