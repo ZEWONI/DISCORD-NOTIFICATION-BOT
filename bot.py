@@ -136,7 +136,6 @@ async def check_feeds():
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Tüm abonelikler kontrol ediliyor...")
 
     async with aiohttp.ClientSession() as session:
-        # DEĞİŞİKLİK: subscriptions listesini kopyalamıyoruz, doğrudan üzerinde çalışıyoruz.
         for sub in subscriptions:
             try:
                 if sub['type'] == 'kick':
@@ -150,14 +149,20 @@ async def check_feeds():
                     if is_live_now and not was_live_before:
                         channel = bot.get_channel(sub['discord_channel_id'])
                         if channel:
-                            # ... bildirim gönderme kodu ...
-                            await channel.send(f"Hey @everyone! `{data['user']['username']}` Kick'te yayın başlattı!", embed=...)
+                            embed = discord.Embed(title=f"🔴 {data['user']['username']} şimdi yayında!", url=f"https://kick.com/{data['user']['username']}", description=f"**{livestream_data['session_title']}**", color=0x00ff00)
+                            embed.set_author(name="Kick.com"); embed.set_thumbnail(url=data['user']['profile_pic'])
+                            if livestream_data.get('thumbnail'): embed.set_image(url=livestream_data['thumbnail']['url'])
+                            embed.add_field(name="Kategori", value=livestream_data['categories'][0]['name'], inline=True)
+                            embed.add_field(name="İzleyici", value=livestream_data.get('viewer_count', 0), inline=True)
+                            embed.set_footer(text="Yayın başladı!")
+                            # ---> DÜZELTME BURADA: embed=embed olarak değiştirildi
+                            await channel.send(f"Hey @everyone! `{data['user']['username']}` Kick'te yayın başlattı!", embed=embed)
                             print(f"Kick bildirimi gönderildi: {data['user']['username']}")
                         sub['was_live'] = True
-                        save_subscriptions(subscriptions) # ---> DEĞİŞİKLİK BURADA: Durum değiştiği an KAYDET
+                        save_subscriptions(subscriptions)
                     elif not is_live_now and was_live_before:
                         sub['was_live'] = False
-                        save_subscriptions(subscriptions) # ---> DEĞİŞİKLİK BURADA: Durum değiştiği an KAYDET
+                        save_subscriptions(subscriptions)
                         print(f"Kick yayını sona erdi: {username}")
 
                 elif sub['type'] in ['youtube', 'rss']:
@@ -169,24 +174,24 @@ async def check_feeds():
                         latest_entry = feed.entries[0]
                         entry_id = latest_entry.get('id') or latest_entry.get('link')
                         if entry_id is None: continue
-                        
-                        # İlk kontrol mantığını daha güvenilir hale getiriyoruz
                         if sub.get('last_entry_id') is None:
                             sub['last_entry_id'] = entry_id
-                            save_subscriptions(subscriptions) # ---> DEĞİŞİKLİK BURADA: İlk ID'yi hemen KAYDET
-                            continue
-
+                            save_subscriptions(subscriptions); continue
                         if sub.get('last_entry_id') != entry_id:
                             channel = bot.get_channel(sub['discord_channel_id'])
                             if channel:
-                                # ... bildirim gönderme kodu ...
-                                await channel.send(embed=...)
-                                print(f"Feed gönderisi gönderildi: {latest_entry.title}")
+                                embed = discord.Embed(title=f"🆕 Yeni İçerik: {latest_entry.title}", url=latest_entry.link, description=f"**{feed.feed.title}** sitesinden yeni içerik var!", color=discord.Color.red() if sub['type'] == 'youtube' else discord.Color.green())
+                                if 'author' in latest_entry: embed.set_author(name=latest_entry.author)
+                                image_url = None
+                                if 'media_thumbnail' in latest_entry and latest_entry.media_thumbnail: image_url = latest_entry.media_thumbnail[0].get('url')
+                                elif 'summary' in latest_entry: match = re.search(r'<img[^>]+src="([^">]+)"', latest_entry.summary); image_url = match.group(1) if match else None
+                                if image_url: embed.set_image(url=image_url)
+                                # ---> DÜZELTME BURADA: embed=embed olarak değiştirildi
+                                await channel.send(embed=embed)
                             sub['last_entry_id'] = entry_id
-                            save_subscriptions(subscriptions) # ---> DEĞİŞİKLİK BURADA: Yeni ID'yi hemen KAYDET
+                            save_subscriptions(subscriptions)
             
             except Exception as e:
                 print(f"Bir abonelik işlenirken hata oluştu ({sub.get('id')}): {e}")
-    # Döngü sonundaki genel save_subscriptions çağrısını kaldırıyoruz çünkü artık gerek yok.
 
 bot.run(TOKEN)
