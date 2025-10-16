@@ -13,6 +13,7 @@ from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from webdriver_manager.firefox import GeckoDriverManager
 from selenium.webdriver.common.by import By
+# YENİ: Akıllı bekleme için gerekli kütüphaneler
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
@@ -34,7 +35,7 @@ def load_subscriptions():
 def save_subscriptions(subscriptions):
     with open(SUBS_FILE, 'w', encoding='utf-8') as f: json.dump(subscriptions, f, indent=4)
 
-# YENİ: Bu fonksiyon artık çalışan bir tarayıcıyı parametre olarak alıyor
+# GÜNCELLENMİŞ: Selenium Fonksiyonu artık akıllı bekleme kullanıyor
 def get_kick_channel_data_with_driver(driver, username):
     data = None
     try:
@@ -47,12 +48,18 @@ def get_kick_channel_data_with_driver(driver, username):
         data = json.loads(json_text)
     except Exception as e:
         print(f"Selenium ile Kick verisi alınırken hata ({username}): {e}")
+        # HATA DURUMUNDA SAYFANIN KAYNAK KODUNU LOGLARA BAS
+        try:
+            print("--- HATA ANINDAKİ SAYFA KAYNAĞI ---")
+            print(driver.page_source)
+            print("---------------------------------")
+        except:
+            pass # Sayfa kaynağını alırken bile hata olursa yoksay
     return data
 
 @bot.event
 async def on_ready():
     print(f'{bot.user} olarak giriş yapıldı.')
-    # GECKODRIVER'I BOT BAŞLARKEN BİR KERE İNDİRİYORUZ
     try:
         print("GeckoDriver kontrol ediliyor/indiriliyor...")
         GeckoDriverManager().install()
@@ -63,9 +70,7 @@ async def on_ready():
     check_feeds.start()
     print("Slash komutları senkronize edildi ve feed kontrol döngüsü başladı.")
 
-# --- Slash Komutları (Değişiklik yok) ---
-# ... (Tüm slash komutları aynı kalıyor, buraya tekrar eklemiyorum)
-
+# ... (Slash komutları ve diğer fonksiyonlar aynı kalıyor) ...
 # --- ARKA PLAN GÖREVİ (FEED KONTROLÜ) - MİMARİ DEĞİŞTİ ---
 @tasks.loop(minutes=5)
 async def check_feeds():
@@ -84,12 +89,10 @@ async def check_feeds():
             options = FirefoxOptions()
             options.add_argument("--headless")
             options.binary_location = '/usr/lib/firefox-esr/firefox-esr'
-            # GeckoDriver'ı her seferinde indirmek yerine kurulu olanı kullanıyoruz
             driver = webdriver.Firefox(service=FirefoxService(), options=options)
             
             for sub in kick_subs:
                 username = sub['username']
-                # Botu dondurmamak için senkron çalışan fonksiyonu ayrı bir iş parçacığında çalıştır
                 data = await bot.loop.run_in_executor(None, get_kick_channel_data_with_driver, driver, username)
                 
                 if data is None: continue
