@@ -1,6 +1,7 @@
 # Discord Bot Dependencies
 discord.py==2.3.2
 python-dotenv==1.0.0
+PyNaCl==1.5.0
 
 # RSS/Feed Parsing
 feedparser==6.0.10
@@ -12,3 +13,8 @@ webdriver-manager==4.0.1
 
 # Twitter API (Optional)
 tweepy==4.14.0
+
+# Note: FFmpeg is required for voice features
+# Install with: sudo apt install ffmpeg (Linux)
+#              brew install ffmpeg (macOS)
+#              Download from ffmpeg.org (Windows)
