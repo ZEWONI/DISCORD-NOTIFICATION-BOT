@@ -15,9 +15,16 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import asyncio
-import tweepy
 from typing import Optional, Dict, List
 import time as time_module
+
+# Optional: Twitter support
+try:
+    import tweepy
+    TWITTER_AVAILABLE = True
+except ImportError:
+    TWITTER_AVAILABLE = False
+    print("⚠️ Tweepy not installed - Twitter features disabled")
 
 # ==================== CONFIG SYSTEM ====================
 class Config:
@@ -186,9 +193,11 @@ stats = Stats()
 
 # ==================== BOT SETUP ====================
 intents = discord.Intents.default()
-intents.message_content = True
+intents.message_content = False  # Gerekirse True yap
 intents.guilds = True
 intents.voice_states = True
+# intents.members = False  # Kullanmıyoruz
+# intents.presences = False  # Kullanmıyoruz
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 tree = bot.tree
@@ -245,6 +254,10 @@ def get_kick_channel_data_with_driver(driver, username):
 class TwitterClient:
     def __init__(self):
         self.client = None
+        if not TWITTER_AVAILABLE:
+            print("⚠️ Twitter features unavailable - install tweepy")
+            return
+        
         if config.TWITTER_BEARER_TOKEN:
             try:
                 self.client = tweepy.Client(bearer_token=config.TWITTER_BEARER_TOKEN)
@@ -252,7 +265,7 @@ class TwitterClient:
                 print(f"[Twitter] Init failed: {e}")
     
     async def get_user_tweets(self, username: str, last_tweet_id: Optional[str] = None):
-        if not self.client:
+        if not self.client or not TWITTER_AVAILABLE:
             return None
         
         try:
@@ -386,6 +399,9 @@ async def on_ready():
     print(f'⏱️ Kontrol: {config.CHECK_INTERVAL}s')
     print(f'🧪 Test Modu: {config.TEST_MODE}')
     
+    # Auto-migrate old subscriptions (add guild_id)
+    await migrate_old_subscriptions()
+    
     try:
         await asyncio.to_thread(GeckoDriverManager().install)
         print("✅ GeckoDriver hazır")
@@ -407,6 +423,31 @@ async def on_ready():
             print(f"[Voice Connect] {guild_id_str}: {e}")
     
     print("✅ Bot hazır!")
+
+async def migrate_old_subscriptions():
+    """Auto-migrate old subscriptions without guild_id"""
+    subscriptions = load_subscriptions()
+    changed = False
+    
+    for sub in subscriptions:
+        # Skip if already has guild_id
+        if sub.get('guild_id'):
+            continue
+        
+        # Try to find guild from channel_id
+        channel_id = sub.get('discord_channel_id')
+        if channel_id:
+            channel = bot.get_channel(channel_id)
+            if channel and hasattr(channel, 'guild'):
+                sub['guild_id'] = channel.guild.id
+                changed = True
+                print(f"🔄 Migration: {sub.get('id', 'unknown')[:30]} → Guild {channel.guild.name}")
+    
+    if changed:
+        await save_subscriptions(subscriptions)
+        print(f"✅ {sum(1 for s in subscriptions if s.get('guild_id'))} abonelik migration tamamlandı")
+    else:
+        print("ℹ️ Migration gerekmiyor")
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -556,6 +597,10 @@ async def feed_add(interaction: discord.Interaction, feed_url: str, kanal: disco
 
 @tree.command(name="twitter_ekle", description="Twitter hesabı takip et")
 async def twitter_add(interaction: discord.Interaction, kullanici_adi: str, kanal: discord.TextChannel):
+    if not TWITTER_AVAILABLE:
+        await interaction.response.send_message("❌ Tweepy kurulu değil. Kurmak için: `pip install tweepy`", ephemeral=True)
+        return
+    
     if not config.TWITTER_BEARER_TOKEN:
         await interaction.response.send_message("❌ Twitter API yapılandırılmamış", ephemeral=True)
         return
@@ -582,7 +627,9 @@ async def twitter_add(interaction: discord.Interaction, kullanici_adi: str, kana
 @tree.command(name="abonelikleri_listele", description="Tüm abonelikleri listele")
 async def list_subs(interaction: discord.Interaction):
     subscriptions = load_subscriptions()
-    guild_subs = [s for s in subscriptions if s.get('guild_id') == interaction.guild_id]
+    
+    # Backward compatibility: filter by guild OR show all if no guild_id exists
+    guild_subs = [s for s in subscriptions if s.get('guild_id') == interaction.guild_id or not s.get('guild_id')]
     
     if not guild_subs:
         await interaction.response.send_message(get_text('no_subs', interaction.guild_id), ephemeral=True)
@@ -611,7 +658,9 @@ async def list_subs(interaction: discord.Interaction):
 @tree.command(name="abonelik_sil", description="Abonelik sil")
 async def del_sub(interaction: discord.Interaction, numara: int):
     subscriptions = load_subscriptions()
-    guild_subs = [s for s in subscriptions if s.get('guild_id') == interaction.guild_id]
+    
+    # Backward compatibility: filter by guild OR show all if no guild_id exists
+    guild_subs = [s for s in subscriptions if s.get('guild_id') == interaction.guild_id or not s.get('guild_id')]
     
     index = numara - 1
     if not (0 <= index < len(guild_subs)):
