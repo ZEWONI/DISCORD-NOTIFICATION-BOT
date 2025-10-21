@@ -23,7 +23,7 @@ SUBS_FILE = 'subscriptions.json'
 CHECK_INTERVAL_SECONDS = 30  # Kontrol süresi 30 saniye
 
 # Bot setup
-intents = discord.intents.default()
+intents = discord.Intents.default()
 bot = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(bot)
 
