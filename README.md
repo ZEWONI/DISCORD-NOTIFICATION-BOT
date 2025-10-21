@@ -511,24 +511,7 @@ MIT License - Detaylar için `LICENSE` dosyasına bakın.
 - **Selenium** - Kick.com scraping
 - **Tweepy** - Twitter API
 - **feedparser** - RSS/Atom parsing
-
----
-
-## 💬 Destek
-
-### Discord Sunucusu
-[Discord Sunucumuza Katıl](https://discord.gg/your-invite-link)
-
-### Dokümantasyon
-- [Komutlar Rehberi](docs/commands.md)
-- [API Dokümantasyonu](docs/api.md)
-- [Troubleshooting](docs/troubleshooting.md)
-
-### İletişim
-- GitHub Issues: Bug ve feature requests
-- Discord: Gerçek zamanlı destek
-- Email: support@example.com
-
+  
 ---
 
 ## 📸 Ekran Görüntüleri
@@ -687,44 +670,7 @@ Hayır! Bot tamamen ücretsiz. Premium özellik yok.
 
 ---
 
-## 🏆 Hall of Fame
-
-En çok katkıda bulunanlar:
-1. [@username1](https://github.com/username1) - 50+ commits
-2. [@username2](https://github.com/username2) - Feature X
-3. [@username3](https://github.com/username3) - Documentation
-
-Teşekkürler! 🙏
-
----
-
-## 📢 Sosyal Medya
-
-Bizi takip edin:
-- 🐦 Twitter: [@YourBotName](https://twitter.com/yourbotname)
-- 📘 Discord: [Sunucu Linki](https://discord.gg/invite)
-- 💻 GitHub: [Repository](https://github.com/yourusername/notification-bot)
-- 📺 YouTube: [Tutorial Playlist](https://youtube.com/@yourchannel)
-
----
-
-## 🎉 Başarılar
-
-- 🌟 1000+ GitHub yıldız
-- 👥 5000+ aktif kullanıcı
-- 🌍 50+ ülkede kullanılıyor
-- ⚡ 1M+ bildirim gönderildi
-
----
-
 **Bot'u beğendiniz mi? ⭐ GitHub'da yıldız verin!**
-
----
-
-*Son güncelleme: 21 Ekim 2025*  
-*Versiyon: 2.0.0*  
-*Maintainer: [@yourusername](https://github.com/yourusername)*
-
 ---
 
 ## 🔗 Hızlı Linkler
