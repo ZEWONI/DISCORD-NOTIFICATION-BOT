@@ -1,0 +1,14 @@
+# Discord Bot Dependencies
+discord.py==2.3.2
+python-dotenv==1.0.0
+
+# RSS/Feed Parsing
+feedparser==6.0.10
+aiohttp==3.9.1
+
+# Selenium for Kick API
+selenium==4.15.2
+webdriver-manager==4.0.1
+
+# Twitter API (Optional)
+tweepy==4.14.0
