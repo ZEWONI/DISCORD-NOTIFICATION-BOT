@@ -511,24 +511,7 @@ MIT License - Detaylar için `LICENSE` dosyasına bakın.
 - **Selenium** - Kick.com scraping
 - **Tweepy** - Twitter API
 - **feedparser** - RSS/Atom parsing
-
----
-
-## 💬 Destek
-
-### Discord Sunucusu
-[Discord Sunucumuza Katıl](https://discord.gg/your-invite-link)
-
-### Dokümantasyon
-- [Komutlar Rehberi](docs/commands.md)
-- [API Dokümantasyonu](docs/api.md)
-- [Troubleshooting](docs/troubleshooting.md)
-
-### İletişim
-- GitHub Issues: Bug ve feature requests
-- Discord: Gerçek zamanlı destek
-- Email: support@example.com
-
+  
 ---
 
 ## 📸 Ekran Görüntüleri
