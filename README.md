@@ -24,8 +24,8 @@
 
 1.  **Projeyi Klonlayın:**
     ```bash
-    git clone [https://github.com/KULLANICI_ADINIZ/REPO_ADINIZ.git](https://github.com/KULLANICI_ADINIZ/REPO_ADINIZ.git)
-    cd REPO_ADINIZ
+    git clone https://github.com/ZEWONI/DISCORD-NOTIFICATION-BOT.git
+    cd DISCORD-NOTIFICATION-BOT
     ```
 
 2.  **`.env` Dosyasını Oluşturun:**
