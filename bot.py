@@ -300,6 +300,13 @@ twitter_client = TwitterClient()
 async def play_notification_sound(guild_id: int):
     """Play notification sound in voice channel"""
     try:
+        # Check if PyNaCl is available
+        try:
+            import nacl
+        except ImportError:
+            # Silently skip if PyNaCl not installed
+            return
+        
         voice_channel_id = config.bot_config.get('voice_channels', {}).get(str(guild_id))
         if not voice_channel_id:
             return
@@ -986,7 +993,42 @@ async def check_single_feed(session, sub):
             if not entry_id:
                 return
             
+            # First run: just save the ID, don't notify
             if sub.get('last_entry_id') is None:
+                subscriptions = load_subscriptions()
+                for s in subscriptions:
+                    if s.get('id') == sub.get('id'):
+                        s['last_entry_id'] = entry_id
+                await save_subscriptions(subscriptions)
+                print(f"ℹ️ İlk çalıştırma: {sub['type'].upper()} {sub.get('id', 'N/A')[:30]} → ID kaydedildi")
+                return
+            
+            # Check if this is actually a NEW entry (strict comparison)
+            if sub['last_entry_id'] == entry_id:
+                # Already notified, skip
+                return
+            
+            # Double-check: Make sure the entry is recent (not older than 24 hours)
+            if 'published_parsed' in latest:
+                import time
+                entry_time = time.mktime(latest.published_parsed)
+                current_time = time.time()
+                age_hours = (current_time - entry_time) / 3600
+                
+                if age_hours > 24:
+                    # Entry is too old, just update ID without notifying
+                    subscriptions = load_subscriptions()
+                    for s in subscriptions:
+                        if s.get('id') == sub.get('id'):
+                            s['last_entry_id'] = entry_id
+                    await save_subscriptions(subscriptions)
+                    print(f"⏰ Eski içerik atlandı: {latest.title[:30]} ({age_hours:.1f} saat)")
+                    return
+            
+            # Check filters
+            if not check_filters(sub, {'title': latest.title}):
+                print(f"🎯 {sub['type'].upper()} filtre engelledi: {latest.title[:30]}")
+                # Update ID but don't notify
                 subscriptions = load_subscriptions()
                 for s in subscriptions:
                     if s.get('id') == sub.get('id'):
@@ -994,64 +1036,53 @@ async def check_single_feed(session, sub):
                 await save_subscriptions(subscriptions)
                 return
             
-            if sub['last_entry_id'] != entry_id:
-                # Check filters
-                if not check_filters(sub, {'title': latest.title}):
-                    print(f"🎯 {sub['type'].upper()} filtre engelledi: {latest.title[:30]}")
-                    # Update ID but don't notify
-                    subscriptions = load_subscriptions()
-                    for s in subscriptions:
-                        if s.get('id') == sub.get('id'):
-                            s['last_entry_id'] = entry_id
-                    await save_subscriptions(subscriptions)
-                    return
+            channel = bot.get_channel(sub['discord_channel_id'])
+            if channel:
+                is_youtube = sub['type'] == 'youtube'
                 
-                channel = bot.get_channel(sub['discord_channel_id'])
-                if channel:
-                    is_youtube = sub['type'] == 'youtube'
-                    
-                    embed = discord.Embed(
-                        title=f"{'🎥' if is_youtube else '📰'} {latest.title}",
-                        url=latest.link,
-                        description=f"**{feed.feed.get('title', 'Yeni İçerik')}**",
-                        color=discord.Color.red() if is_youtube else discord.Color.green()
-                    )
-                    
-                    if 'author' in latest:
-                        embed.set_author(name=latest.author)
-                    
-                    img_url = None
-                    if 'media_thumbnail' in latest and latest.media_thumbnail:
-                        img_url = latest.media_thumbnail[0].get('url')
-                    elif 'summary' in latest:
-                        match = re.search(r'<img[^>]+src="([^">]+)"', latest.summary)
-                        if match:
-                            img_url = match.group(1)
-                    
-                    if img_url:
-                        embed.set_image(url=img_url)
-                    
-                    # Custom message
-                    embed = get_custom_embed(sub, embed)
-                    
-                    # Get mention
-                    mention = get_mention_string(sub.get('guild_id'), sub['type'])
-                    
-                    await channel.send(f"{mention}", embed=embed)
-                    
-                    # Play sound
-                    await play_notification_sound(sub.get('guild_id'))
-                    
-                    # Stats
-                    stats.add_notification(sub['type'], latest.title, channel.id)
-                    
-                    print(f"✅ {sub['type'].upper()}: {latest.title[:50]}")
+                embed = discord.Embed(
+                    title=f"{'🎥' if is_youtube else '📰'} {latest.title}",
+                    url=latest.link,
+                    description=f"**{feed.feed.get('title', 'Yeni İçerik')}**",
+                    color=discord.Color.red() if is_youtube else discord.Color.green()
+                )
                 
-                subscriptions = load_subscriptions()
-                for s in subscriptions:
-                    if s.get('id') == sub.get('id'):
-                        s['last_entry_id'] = entry_id
-                await save_subscriptions(subscriptions)
+                if 'author' in latest:
+                    embed.set_author(name=latest.author)
+                
+                img_url = None
+                if 'media_thumbnail' in latest and latest.media_thumbnail:
+                    img_url = latest.media_thumbnail[0].get('url')
+                elif 'summary' in latest:
+                    match = re.search(r'<img[^>]+src="([^">]+)"', latest.summary)
+                    if match:
+                        img_url = match.group(1)
+                
+                if img_url:
+                    embed.set_image(url=img_url)
+                
+                # Custom message
+                embed = get_custom_embed(sub, embed)
+                
+                # Get mention
+                mention = get_mention_string(sub.get('guild_id'), sub['type'])
+                
+                await channel.send(f"{mention}", embed=embed)
+                
+                # Play sound
+                await play_notification_sound(sub.get('guild_id'))
+                
+                # Stats
+                stats.add_notification(sub['type'], latest.title, channel.id)
+                
+                print(f"✅ {sub['type'].upper()}: {latest.title[:50]}")
+            
+            # Update last_entry_id ONLY AFTER successful notification
+            subscriptions = load_subscriptions()
+            for s in subscriptions:
+                if s.get('id') == sub.get('id'):
+                    s['last_entry_id'] = entry_id
+            await save_subscriptions(subscriptions)
     
     except asyncio.TimeoutError:
         print(f"⏱️ Timeout: {sub.get('url', 'N/A')[:50]}")
