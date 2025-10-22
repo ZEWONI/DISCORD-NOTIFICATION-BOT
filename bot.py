@@ -206,6 +206,7 @@ tree = bot.tree
 _subscriptions_cache = None
 _cache_lock = asyncio.Lock()
 _voice_clients = {}  # guild_id: voice_client
+_notified_entries = {}  # sub_id: set of entry_ids (prevent duplicates)
 
 # ==================== DATA MANAGEMENT ====================
 def load_subscriptions():
@@ -887,7 +888,14 @@ async def check_kick_streams(kick_subs):
             username = sub['username']
             data = await asyncio.to_thread(get_kick_channel_data_with_driver, driver, username)
             
+            # Handle None data
             if data is None:
+                print(f"⚠️ Kick API yanıt vermedi: {username}")
+                continue
+            
+            # Validate data structure
+            if not isinstance(data, dict):
+                print(f"⚠️ Kick geçersiz veri formatı: {username}")
                 continue
             
             livestream = data.get('livestream')
@@ -962,10 +970,13 @@ async def check_kick_streams(kick_subs):
                 print(f"🔵 Kick bitti: {username}")
     
     except Exception as e:
-        print(f"❌ Kick: {e}")
+        print(f"❌ Kick genel hata: {e}")
     finally:
         if driver:
-            await asyncio.to_thread(driver.quit)
+            try:
+                await asyncio.to_thread(driver.quit)
+            except:
+                pass
 
 # ==================== RSS/YOUTUBE CHECKER ====================
 async def check_rss_feeds(feed_subs):
@@ -976,6 +987,8 @@ async def check_rss_feeds(feed_subs):
         await asyncio.gather(*tasks, return_exceptions=True)
 
 async def check_single_feed(session, sub):
+    global _notified_entries
+    
     try:
         async with session.get(sub['url']) as resp:
             if resp.status != 200:
@@ -993,6 +1006,17 @@ async def check_single_feed(session, sub):
             if not entry_id:
                 return
             
+            sub_id = sub.get('id')
+            
+            # Initialize notified entries set for this subscription
+            if sub_id not in _notified_entries:
+                _notified_entries[sub_id] = set()
+            
+            # Check if already notified in THIS session (memory check)
+            if entry_id in _notified_entries[sub_id]:
+                # Already notified in this session, skip silently
+                return
+            
             # First run: just save the ID, don't notify
             if sub.get('last_entry_id') is None:
                 subscriptions = load_subscriptions()
@@ -1000,12 +1024,14 @@ async def check_single_feed(session, sub):
                     if s.get('id') == sub.get('id'):
                         s['last_entry_id'] = entry_id
                 await save_subscriptions(subscriptions)
+                _notified_entries[sub_id].add(entry_id)
                 print(f"ℹ️ İlk çalıştırma: {sub['type'].upper()} {sub.get('id', 'N/A')[:30]} → ID kaydedildi")
                 return
             
             # Check if this is actually a NEW entry (strict comparison)
             if sub['last_entry_id'] == entry_id:
-                # Already notified, skip
+                # Already notified, add to cache and skip
+                _notified_entries[sub_id].add(entry_id)
                 return
             
             # Double-check: Make sure the entry is recent (not older than 24 hours)
@@ -1022,8 +1048,14 @@ async def check_single_feed(session, sub):
                         if s.get('id') == sub.get('id'):
                             s['last_entry_id'] = entry_id
                     await save_subscriptions(subscriptions)
+                    _notified_entries[sub_id].add(entry_id)
                     print(f"⏰ Eski içerik atlandı: {latest.title[:30]} ({age_hours:.1f} saat)")
                     return
+            
+            # Triple-check: Already in notified cache?
+            if entry_id in _notified_entries[sub_id]:
+                print(f"🔁 Duplicate önlendi: {latest.title[:30]}")
+                return
             
             # Check filters
             if not check_filters(sub, {'title': latest.title}):
@@ -1034,6 +1066,7 @@ async def check_single_feed(session, sub):
                     if s.get('id') == sub.get('id'):
                         s['last_entry_id'] = entry_id
                 await save_subscriptions(subscriptions)
+                _notified_entries[sub_id].add(entry_id)
                 return
             
             channel = bot.get_channel(sub['discord_channel_id'])
@@ -1067,7 +1100,11 @@ async def check_single_feed(session, sub):
                 # Get mention
                 mention = get_mention_string(sub.get('guild_id'), sub['type'])
                 
+                # SEND MESSAGE
                 await channel.send(f"{mention}", embed=embed)
+                
+                # Mark as notified IMMEDIATELY after sending
+                _notified_entries[sub_id].add(entry_id)
                 
                 # Play sound
                 await play_notification_sound(sub.get('guild_id'))
@@ -1083,6 +1120,11 @@ async def check_single_feed(session, sub):
                 if s.get('id') == sub.get('id'):
                     s['last_entry_id'] = entry_id
             await save_subscriptions(subscriptions)
+            
+            # Keep cache size reasonable (max 100 entries per sub)
+            if len(_notified_entries[sub_id]) > 100:
+                # Keep only the 50 most recent
+                _notified_entries[sub_id] = set(list(_notified_entries[sub_id])[-50:])
     
     except asyncio.TimeoutError:
         print(f"⏱️ Timeout: {sub.get('url', 'N/A')[:50]}")
