@@ -32,13 +32,18 @@ class Config:
         load_dotenv()
         self.TOKEN = os.getenv('DISCORD_TOKEN')
         self.TWITTER_BEARER_TOKEN = os.getenv('TWITTER_BEARER_TOKEN')
-        self.CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL_SECONDS', '30'))
+        self.CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL_SECONDS', '60'))  # 30'dan 60'a çıkarıldı
         self.SUBS_FILE = os.getenv('SUBS_FILE', 'subscriptions.json')
         self.CONFIG_FILE = os.getenv('CONFIG_FILE', 'bot_config.json')
         self.STATS_FILE = os.getenv('STATS_FILE', 'bot_stats.json')
         self.NOTIFICATION_SOUND = os.getenv('NOTIFICATION_SOUND', 'notif.mp3')
         self.DEFAULT_LANGUAGE = os.getenv('DEFAULT_LANGUAGE', 'tr')
         self.TEST_MODE = os.getenv('TEST_MODE', 'false').lower() == 'true'
+        
+        # Network optimization settings
+        self.MAX_CONCURRENT_CHECKS = int(os.getenv('MAX_CONCURRENT_CHECKS', '3'))  # Max parallel requests
+        self.REQUEST_TIMEOUT = int(os.getenv('REQUEST_TIMEOUT', '8'))  # Reduced from 10
+        self.SELENIUM_TIMEOUT = int(os.getenv('SELENIUM_TIMEOUT', '6'))  # Reduced from 8
         
         # Load bot config
         self.bot_config = self.load_bot_config()
