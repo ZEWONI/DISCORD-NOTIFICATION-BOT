@@ -245,9 +245,10 @@ def _write_subs_file(subscriptions):
 def get_kick_channel_data_with_driver(driver, username):
     try:
         api_url = f"https://kick.com/api/v2/channels/{username}"
+        driver.set_page_load_timeout(config.SELENIUM_TIMEOUT)
         driver.get(api_url)
         
-        wait = WebDriverWait(driver, 8)
+        wait = WebDriverWait(driver, config.SELENIUM_TIMEOUT)
         body_element = wait.until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
         json_text = body_element.text
         
@@ -871,13 +872,24 @@ async def check_feeds():
 
 # ==================== KICK CHECKER ====================
 async def check_kick_streams(kick_subs):
+    # Skip Kick checks if no subscriptions
+    if not kick_subs:
+        return
+    
     driver = None
     try:
         options = FirefoxOptions()
         options.add_argument("--headless")
         options.add_argument("--disable-gpu")
         options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")  # Reduce memory usage
+        options.add_argument("--disable-extensions")
+        options.add_argument("--disable-images")  # Don't load images
         options.page_load_strategy = 'eager'
+        
+        # Set memory and cache limits
+        options.set_preference("browser.cache.disk.enable", False)
+        options.set_preference("browser.cache.memory.enable", False)
         
         binary = '/usr/lib/firefox-esr/firefox-esr'
         if os.path.exists(binary):
@@ -889,59 +901,83 @@ async def check_kick_streams(kick_subs):
         
         subscriptions = load_subscriptions()
         
-        for sub in kick_subs:
+        # Process Kick streams with small delays between requests
+        for idx, sub in enumerate(kick_subs):
             username = sub['username']
             data = await asyncio.to_thread(get_kick_channel_data_with_driver, driver, username)
             
             # Handle None data
             if data is None:
-                print(f"⚠️ Kick API yanıt vermedi: {username}")
                 continue
             
             # Validate data structure
             if not isinstance(data, dict):
-                print(f"⚠️ Kick geçersiz veri formatı: {username}")
                 continue
             
-            livestream = data.get('livestream')
-            is_live = livestream is not None
+            # Safely get livestream data
+            livestream = data.get('livestream') if data else None
+            is_live = livestream is not None and isinstance(livestream, dict)
             was_live = sub.get('was_live', False)
             
             if is_live and not was_live:
-                # Check filters
+                # Check filters - double check livestream is valid
+                if not livestream:
+                    continue
+                    
                 if not check_filters(sub, {'livestream': livestream}):
                     print(f"🎯 Kick filtre engelledi: {username}")
                     continue
                 
                 channel = bot.get_channel(sub['discord_channel_id'])
                 if channel:
-                    user_data = data.get('user', {})
+                    # Safely extract user data
+                    user_data = data.get('user') if data else {}
+                    if not isinstance(user_data, dict):
+                        user_data = {}
+                    
+                    # Safely get values with defaults
+                    display_username = user_data.get('username', username)
+                    session_title = livestream.get('session_title', 'Başlıksız')
+                    profile_pic = user_data.get('profile_pic')
+                    viewer_count = livestream.get('viewer_count', 0)
                     
                     embed = discord.Embed(
-                        title=get_text('live_now', sub.get('guild_id', 0), user=user_data.get('username', username)),
+                        title=get_text('live_now', sub.get('guild_id', 0), user=display_username),
                         url=f"https://kick.com/{username}",
-                        description=f"**{livestream.get('session_title', 'Başlıksız')}**",
+                        description=f"**{session_title}**",
                         color=0x53FC18
                     )
                     embed.set_author(name="Kick.com")
                     
-                    if user_data.get('profile_pic'):
-                        embed.set_thumbnail(url=user_data['profile_pic'])
+                    if profile_pic:
+                        try:
+                            embed.set_thumbnail(url=profile_pic)
+                        except:
+                            pass
                     
-                    if livestream.get('thumbnail', {}).get('url'):
-                        embed.set_image(url=livestream['thumbnail']['url'])
+                    # Safely get thumbnail
+                    thumbnail = livestream.get('thumbnail')
+                    if thumbnail and isinstance(thumbnail, dict):
+                        thumbnail_url = thumbnail.get('url')
+                        if thumbnail_url:
+                            try:
+                                embed.set_image(url=thumbnail_url)
+                            except:
+                                pass
                     
+                    # Safely get categories
                     categories = livestream.get('categories', [])
-                    if categories:
+                    if categories and isinstance(categories, list) and len(categories) > 0:
+                        category_name = categories[0].get('name', 'N/A') if isinstance(categories[0], dict) else 'N/A'
                         embed.add_field(
                             name=get_text('category', sub.get('guild_id', 0)),
-                            value=categories[0].get('name', 'N/A'),
+                            value=category_name,
                             inline=True
                         )
                     
                     embed.add_field(
                         name=get_text('viewers', sub.get('guild_id', 0)),
-                        value=str(livestream.get('viewer_count', 0)),
+                        value=str(viewer_count),
                         inline=True
                     )
                     embed.set_footer(text="Yayın başladı!")
@@ -962,17 +998,23 @@ async def check_kick_streams(kick_subs):
                     
                     print(f"✅ Kick: {username}")
                 
+                # Update was_live status
                 for s in subscriptions:
                     if s.get('type') == 'kick' and s.get('username') == username:
                         s['was_live'] = True
                 await save_subscriptions(subscriptions)
             
             elif not is_live and was_live:
+                # Stream ended
                 for s in subscriptions:
                     if s.get('type') == 'kick' and s.get('username') == username:
                         s['was_live'] = False
                 await save_subscriptions(subscriptions)
                 print(f"🔵 Kick bitti: {username}")
+            
+            # Small delay between Kick API requests to avoid rate limiting
+            if idx < len(kick_subs) - 1:
+                await asyncio.sleep(0.3)
     
     except Exception as e:
         print(f"❌ Kick genel hata: {e}")
@@ -985,17 +1027,34 @@ async def check_kick_streams(kick_subs):
 
 # ==================== RSS/YOUTUBE CHECKER ====================
 async def check_rss_feeds(feed_subs):
-    timeout = aiohttp.ClientTimeout(total=10)
+    # Batch processing with connection pooling
+    connector = aiohttp.TCPConnector(limit=config.MAX_CONCURRENT_CHECKS, limit_per_host=2)
+    timeout = aiohttp.ClientTimeout(total=config.REQUEST_TIMEOUT, connect=3)
     
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        tasks = [check_single_feed(session, sub) for sub in feed_subs]
-        await asyncio.gather(*tasks, return_exceptions=True)
+    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+        # Process in batches to avoid overwhelming network
+        batch_size = config.MAX_CONCURRENT_CHECKS
+        for i in range(0, len(feed_subs), batch_size):
+            batch = feed_subs[i:i + batch_size]
+            tasks = [check_single_feed(session, sub) for sub in batch]
+            await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Small delay between batches to reduce network spike
+            if i + batch_size < len(feed_subs):
+                await asyncio.sleep(0.5)
 
 async def check_single_feed(session, sub):
     global _notified_entries
     
     try:
-        async with session.get(sub['url']) as resp:
+        # Add headers to reduce response size
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (compatible; DiscordBot/2.0)',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive'
+        }
+        
+        async with session.get(sub['url'], headers=headers) as resp:
             if resp.status != 200:
                 return
             
